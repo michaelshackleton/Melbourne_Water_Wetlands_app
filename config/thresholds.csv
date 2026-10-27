@@ -1,0 +1,8 @@
+"model","threshold"
+"bare_40",0.17
+"dryVeg_20",0.23
+"dryVegBare_50",0.31
+"greenVeg_40",0.39
+"openwater_50",0.495
+"veg_30",0.49
+"water_60",0.43

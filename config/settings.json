@@ -1,0 +1,14 @@
+{
+  "waterbodies_path": "D:/Waterbodies V1.3/MWregion_Waterbodies_v1.3.shp",
+  "waterbody_id_field": "Unique_ID",
+  "waterbody_label_fields": ["WB_Name", "WB_ID", "WB_Type", "WB_System"],
+  "background_raster": "D:/whole landscape rasters/background reprojection.tif",
+  "background_band_names": ["mean_TCW", "mean_TCG", "mean_TCB", "Q10W", "Q10G", "Q10B", "Q90W", "Q90G", "Q90B"],
+  "local_tci_folder": "D:/DEA landsat rasters - TCW, TCB, TCG",
+  "results_dir": "results",
+  "stac_urls": ["https://explorer.sandbox.dea.ga.gov.au/stac", "https://explorer.dea.ga.gov.au/stac"],
+  "collections": ["ga_ls5t_ard_3", "ga_ls7e_ard_3", "ga_ls8c_ard_3", "ga_ls9c_ard_3"],
+  "pad_m": 60,
+  "fmask_good_values": [1, 4, 5],
+  "max_workers": 16
+}

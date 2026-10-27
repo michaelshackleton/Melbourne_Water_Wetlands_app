@@ -1,0 +1,130 @@
+cmix,cover_description
+bare,Bare
+"bare, dryVeg",Bare and dry vegetation
+"bare, dryVeg, greenVeg",Bare and vegetation
+"bare, dryVeg, greenVeg, water","Bare, vegetation and water"
+"bare, dryVeg, greenVeg, wet","Bare, vegetation and water"
+"bare, dryVeg, greenVeg, wet, water","Bare, vegetation and water"
+"bare, dryVeg, veg",Bare and dry vegetation
+"bare, dryVeg, veg, greenVeg",Bare and vegetation
+"bare, dryVeg, veg, greenVeg, water","Bare, vegetation and water"
+"bare, dryVeg, veg, greenVeg, wet","Bare, vegetation and water"
+"bare, dryVeg, veg, greenVeg, wet, water","Bare, vegetation and water"
+"bare, dryVeg, veg, water","Bare, dry vegetation and water"
+"bare, dryVeg, veg, wet","Bare, dry vegetation and water"
+"bare, dryVeg, veg, wet, water","Bare, dry vegetation and water"
+"bare, dryVeg, water","Bare, dry vegetation and water"
+"bare, dryVeg, wet","Bare, dry vegetation and water"
+"bare, dryVeg, wet, water","Bare, dry vegetation and water"
+"bare, dryVegBare",Bare and dry vegetation
+"bare, dryVegBare, dryVeg",Bare and dry vegetation
+"bare, dryVegBare, dryVeg, greenVeg",Bare and vegetation
+"bare, dryVegBare, dryVeg, greenVeg, water","Bare, vegetation and water"
+"bare, dryVegBare, dryVeg, greenVeg, wet","Bare, vegetation and water"
+"bare, dryVegBare, dryVeg, greenVeg, wet, water","Bare, vegetation and water"
+"bare, dryVegBare, dryVeg, veg",Bare and dry vegetation
+"bare, dryVegBare, dryVeg, veg, greenVeg",Bare and vegetation
+"bare, dryVegBare, dryVeg, veg, greenVeg, water","Bare, vegetation and water"
+"bare, dryVegBare, dryVeg, veg, greenVeg, wet","Bare, vegetation and water"
+"bare, dryVegBare, dryVeg, veg, greenVeg, wet, water","Bare, vegetation and water"
+"bare, dryVegBare, dryVeg, veg, water","Bare, dry vegetation and water"
+"bare, dryVegBare, dryVeg, veg, wet","Bare, dry vegetation and water"
+"bare, dryVegBare, dryVeg, veg, wet, water","Bare, dry vegetation and water"
+"bare, dryVegBare, dryVeg, water","Bare, dry vegetation and water"
+"bare, dryVegBare, dryVeg, wet","Bare, dry vegetation and water"
+"bare, dryVegBare, dryVeg, wet, water","Bare, dry vegetation and water"
+"bare, dryVegBare, greenVeg",Bare and vegetation
+"bare, dryVegBare, greenVeg, water","Bare, vegetation and water"
+"bare, dryVegBare, greenVeg, wet","Bare, vegetation and water"
+"bare, dryVegBare, greenVeg, wet, water","Bare, vegetation and water"
+"bare, dryVegBare, veg",Bare and dry vegetation
+"bare, dryVegBare, veg, greenVeg",Bare and vegetation
+"bare, dryVegBare, veg, greenVeg, water","Bare, vegetation and water"
+"bare, dryVegBare, veg, greenVeg, wet","Bare, vegetation and water"
+"bare, dryVegBare, veg, greenVeg, wet, water","Bare, vegetation and water"
+"bare, dryVegBare, veg, water","Bare, dry vegetation and water"
+"bare, dryVegBare, veg, wet","Bare, dry vegetation and water"
+"bare, dryVegBare, veg, wet, water","Bare, dry vegetation and water"
+"bare, dryVegBare, water","Bare, dry vegetation and water"
+"bare, dryVegBare, wet","Bare, dry vegetation and water"
+"bare, dryVegBare, wet, water","Bare, dry vegetation and water"
+"bare, greenVeg",Bare and green vegetation
+"bare, greenVeg, water","Bare, green vegetation and water"
+"bare, greenVeg, wet","Bare, green vegetation and water"
+"bare, greenVeg, wet, water","Bare, green vegetation and water"
+"bare, veg",Bare and vegetation
+"bare, veg, greenVeg",Bare and green vegetation
+"bare, veg, greenVeg, water","Bare, green vegetation and water"
+"bare, veg, greenVeg, wet","Bare, green vegetation and water"
+"bare, veg, greenVeg, wet, water","Bare, green vegetation and water"
+"bare, veg, water","Bare, vegetation and water"
+"bare, veg, wet","Bare, vegetation and water"
+"bare, veg, wet, water","Bare, vegetation and water"
+"bare, water",Bare and water
+"bare, wet",Bare and water
+"bare, wet, water",Bare and water
+dryVeg,Dry vegetation
+"dryVeg, greenVeg",Vegetation
+"dryVeg, greenVeg, water",Vegetation and water
+"dryVeg, greenVeg, wet",Vegetation and water
+"dryVeg, greenVeg, wet, water",Vegetation and water
+"dryVeg, veg",Dry vegetation
+"dryVeg, veg, greenVeg",Vegetation
+"dryVeg, veg, greenVeg, water",Vegetation and water
+"dryVeg, veg, greenVeg, wet",Vegetation and water
+"dryVeg, veg, greenVeg, wet, water",Vegetation and water
+"dryVeg, veg, water",Dry vegetation and water
+"dryVeg, veg, wet",Dry vegetation and water
+"dryVeg, veg, wet, water",Dry vegetation and water
+"dryVeg, water",Dry vegetation and water
+"dryVeg, wet",Dry vegetation and water
+"dryVeg, wet, water",Dry vegetation and water
+dryVegBare,Bare and dry vegetation
+"dryVegBare, dryVeg",Dry vegetation
+"dryVegBare, dryVeg, greenVeg",Vegetation
+"dryVegBare, dryVeg, greenVeg, water",Vegetation and water
+"dryVegBare, dryVeg, greenVeg, wet",Vegetation and water
+"dryVegBare, dryVeg, greenVeg, wet, water",Vegetation and water
+"dryVegBare, dryVeg, veg",Dry vegetation
+"dryVegBare, dryVeg, veg, greenVeg",Vegetation
+"dryVegBare, dryVeg, veg, greenVeg, water",Vegetation and water
+"dryVegBare, dryVeg, veg, greenVeg, wet",Vegetation and water
+"dryVegBare, dryVeg, veg, greenVeg, wet, water",Vegetation and water
+"dryVegBare, dryVeg, veg, water",Dry vegetation and water
+"dryVegBare, dryVeg, veg, wet",Dry vegetation and water
+"dryVegBare, dryVeg, veg, wet, water",Dry vegetation and water
+"dryVegBare, dryVeg, water",Dry vegetation and water
+"dryVegBare, dryVeg, wet",Dry vegetation and water
+"dryVegBare, dryVeg, wet, water",Dry vegetation and water
+"dryVegBare, greenVeg",Vegetation
+"dryVegBare, greenVeg, water",Vegetation and water
+"dryVegBare, greenVeg, wet",Vegetation and water
+"dryVegBare, greenVeg, wet, water",Vegetation and water
+"dryVegBare, veg",Dry vegetation
+"dryVegBare, veg, greenVeg",Vegetation
+"dryVegBare, veg, greenVeg, water",Vegetation and water
+"dryVegBare, veg, greenVeg, wet",Vegetation and water
+"dryVegBare, veg, greenVeg, wet, water",Vegetation and water
+"dryVegBare, veg, water",Dry vegetation and water
+"dryVegBare, veg, wet",Dry vegetation and water
+"dryVegBare, veg, wet, water",Dry vegetation and water
+"dryVegBare, water",Dry vegetation and water
+"dryVegBare, wet",Dry vegetation and water
+"dryVegBare, wet, water",Dry vegetation and water
+greenVeg,Green vegetation
+"greenVeg, water",Green vegetation and water
+"greenVeg, wet",Green vegetation and water
+"greenVeg, wet, water",Green vegetation and water
+"no_data, no_data, no_data, no_data, no_data, no_data, no_data",no_data
+veg,Vegetation
+"veg, greenVeg",Green vegetation
+"veg, greenVeg, water",Green vegetation and water
+"veg, greenVeg, wet",Green vegetation and water
+"veg, greenVeg, wet, water",Green vegetation and water
+"veg, water",Vegetation and water
+"veg, wet",Vegetation and water
+"veg, wet, water",Vegetation and water
+water,Water
+wet,Water
+"wet, water",Water
+,No prediction
