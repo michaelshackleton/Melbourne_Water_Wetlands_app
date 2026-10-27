@@ -8,9 +8,24 @@ import shapely
 from shapely.geometry import Point
 
 
+def read_layer(path: str) -> gpd.GeoDataFrame:
+    """A shapefile/GeoPackage, a GeoParquet file, or a folder of GeoParquet
+    parts (the layer shipped in data/waterbodies is split in two to keep each
+    file small)."""
+    import os
+    if os.path.isdir(path):
+        parts = sorted(os.path.join(path, f) for f in os.listdir(path) if f.lower().endswith(".parquet"))
+        if not parts:
+            raise FileNotFoundError(f"No .parquet files in {path}")
+        return pd.concat([gpd.read_parquet(p) for p in parts], ignore_index=True)
+    if str(path).lower().endswith(".parquet"):
+        return gpd.read_parquet(path)
+    return gpd.read_file(path)
+
+
 class WaterbodyLayer:
     def __init__(self, path: str, id_field: str = "Unique_ID", label_fields: list[str] | None = None):
-        gdf = gpd.read_file(path)
+        gdf = read_layer(path)
         if id_field not in gdf.columns:
             raise ValueError(f"'{id_field}' is not a column in {path}. Columns: {list(gdf.columns)}")
         gdf = gdf[gdf.geometry.notna()].copy()

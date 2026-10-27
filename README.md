@@ -43,21 +43,49 @@ folder is moved, delete `.venv` and repeat the three commands.
 Double-click `run_app.bat`, or from an activated environment:
 `streamlit run app.py`.
 
+### Data that ships with the app
+
+| File | What it is |
+| --- | --- |
+| `data/waterbodies/MWregion_Waterbodies_v1.3_part1/2.parquet` | `MWregion_Waterbodies_v1.3.shp`, all attributes, geometry unchanged, as GeoParquet split in two (~20 MB each) |
+| `data/background_pixels.parquet` | the nine background predictors for every 30 m pixel touching a waterbody (850,717 pixels, ~33 MB) |
+
+With both files in place the app needs nothing from the D: drive (the local
+TCI rasters option still does).
+
+**How the background table was built.** It holds the values of the three
+whole-landscape composites (mean, 10th and 90th percentile; 9 bands each:
+six reflectance bands then TCW, TCG, TCB) at every 30 m pixel touching a
+waterbody, read directly (they are on the Landsat grid, so no resampling).
+It was made with `scripts/make_background_table.py` from the composites in
+`G:\SABE\CFE\Projects\Melbourne Uni\Completed or closed projects\17_01455 …\GIS\whole landscape rasters`,
+which identifies the tasselled cap bands by recomputing them from the
+reflectance bands. Its values match the original R extraction
+(`background data for wetlands.csv`) exactly. To rebuild (e.g. after editing
+the waterbodies layer):
+
+```
+.venv\Scripts\activate
+python scripts/make_background_table.py --rasters "G:\…\GIS\whole landscape rasters"
+```
+
+(`scripts/build_background_table.py` does the same from the 29.86 m
+`background reprojection.tif`, with bilinear interpolation, if ever needed.)
+
 ### Paths
 
-Defaults are in `config/settings.json`; change them in the sidebar under
-**Paths & advanced settings** and press **Save** (stored in
-`config/user_settings.json`).
+Defaults are in `config/settings.json` (relative paths are inside the app
+folder); change them in the sidebar under **Paths & advanced settings** and
+press **Save** (stored in `config/user_settings.json`, which git ignores).
 
 | Setting | Default |
 | --- | --- |
-| Waterbodies layer | `D:/Waterbodies V1.3/MWregion_Waterbodies_v1.3.shp` |
-| Background (mean/quantile) raster | `D:/whole landscape rasters/background reprojection.tif` |
-| Background band names (band order) | `mean_TCW, mean_TCG, mean_TCB, Q10W, Q10G, Q10B, Q90W, Q90G, Q90B` (as in the R script) |
-| Local TCI rasters folder | `D:/DEA landsat rasters - TCW, TCB, TCG` |
-| Results folder | `results` (inside the app folder) |
-
-**Please check the background band order once** – see *Things to check* below.
+| Waterbodies layer | `data/waterbodies` (a folder of GeoParquet parts; a .shp/.gpkg/.parquet file also works) |
+| Background pixel table | `data/background_pixels.parquet` |
+| Background raster (optional fallback) | `D:/whole landscape rasters/background reprojection.tif` |
+| Background band names (band order) | `mean_TCW, mean_TCG, mean_TCB, Q10W, Q10G, Q10B, Q90W, Q90G, Q90B` (checked with `scripts/check_background_bands.py`) |
+| Local TCI rasters folder (optional) | `D:/DEA landsat rasters - TCW, TCB, TCG` |
+| Results folder | `results` (inside the app folder, ignored by git) |
 
 ## Using it
 
@@ -149,14 +177,10 @@ Melbourne at ~23:30 UTC, i.e. the R `date` is the day *before* the local date.
 
 ## Things to check / issues found in the R scripts
 
-1. **Background band order.** The R script names the bands
-   `mean_TCW, mean_TCG, mean_TCB, …` (W, G, B), but the TCI rasters were stacked
-   W, B, G. If `background reprojection.tif` was built in the TCI order, the
-   brightness and greenness names are swapped – in the original results too.
-   Run `python scripts/check_background_bands.py` once: brightness bands should
-   be in the thousands, greenness in the hundreds (training-site medians are
-   printed alongside). The app also warns if `mean_TCB < mean_TCG` over a
-   waterbody (never the case in the training data).
+1. **Background band order** – checked: `background reprojection.tif` is
+   W, G, B, matching the names the R script assigns. Its pixels are 29.86 m,
+   so values are bilinearly interpolated onto the 30 m Landsat grid (as the R
+   script's `projectRaster` also did).
 2. **The "90% coverage" filter doesn't do what its comment says.** It drops
    pixels with `cover_mix == ";;;;;;"` (all models absent = "No prediction"),
    not cloud/no-data pixels (`"no_data;no_data;…"`), so it filters scenes by
@@ -197,7 +221,7 @@ two scripts.
 * `app.py` – the Streamlit UI
 * `modules/waterbodies.py` – loading/searching the layer, map click lookup
 * `modules/footprint.py` – 30 m pixel grid and exact coverage fractions
-* `modules/background.py` – reads the 9 long-term predictors
+* `modules/background.py` – background predictors from the pixel table, or the raster as a fallback
 * `modules/sources.py` – DEA STAC search + windowed COG reads, local TCI reader, tasselled cap
 * `modules/rf_engine.py` – random forest prediction (numba, numpy fallback)
 * `modules/classify.py` – thresholds, cover mix → cover description, colours
@@ -206,4 +230,5 @@ two scripts.
 * `config/` – settings, thresholds (`maxSensSpec thresholds for models 15122025.csv`),
   cover combinations (`all possible combinations.csv`)
 * `models/` – the exported forests
-* `scripts/` – batch processing, background band check, model export/rebuild
+* `data/` – the waterbodies layer and background pixel table
+* `scripts/` – batch processing, background table builders, background band check, model export/rebuild

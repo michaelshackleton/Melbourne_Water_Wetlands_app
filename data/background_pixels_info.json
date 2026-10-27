@@ -1,0 +1,27 @@
+{
+  "source": [
+    "G:\\SABE\\CFE\\Projects\\Melbourne Uni\\Completed or closed projects\\17_01455 Spatial prioritisation of waterway management for biodiversity outcomes\\Data\\wetland inundation model\\GIS\\whole landscape rasters\\mean TCI composite image of Melbourne region.tif",
+    "G:\\SABE\\CFE\\Projects\\Melbourne Uni\\Completed or closed projects\\17_01455 Spatial prioritisation of waterway management for biodiversity outcomes\\Data\\wetland inundation model\\GIS\\whole landscape rasters\\10th percentile composite image of Melbourne region.tif",
+    "G:\\SABE\\CFE\\Projects\\Melbourne Uni\\Completed or closed projects\\17_01455 Spatial prioritisation of waterway management for biodiversity outcomes\\Data\\wetland inundation model\\GIS\\whole landscape rasters\\90th percentile composite image of Melbourne region.tif"
+  ],
+  "bands_used": {
+    "mean": {
+      "W": 7,
+      "B": 9,
+      "G": 8
+    },
+    "Q10": {
+      "W": 7,
+      "B": 9,
+      "G": 8
+    },
+    "Q90": {
+      "W": 7,
+      "B": 9,
+      "G": 8
+    }
+  },
+  "n_pixels": 850717,
+  "built": "2026-10-27 18:39",
+  "waterbodies": "C:\\Users\\Meshackleton\\Documents\\rs-utils-main\\waterbodies app\\data/waterbodies"
+}

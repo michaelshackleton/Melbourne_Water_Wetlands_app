@@ -120,7 +120,9 @@ def pick_path(kind: str, initial: str | None) -> str | None:
     if kind == "folder":
         out = filedialog.askdirectory(initialdir=init)
     elif kind == "shp":
-        out = filedialog.askopenfilename(initialdir=init, filetypes=[("Shapefile / GeoPackage", "*.shp *.gpkg"), ("All", "*.*")])
+        out = filedialog.askopenfilename(initialdir=init, filetypes=[("Waterbodies layer", "*.parquet *.shp *.gpkg"), ("All", "*.*")])
+    elif kind == "file":
+        out = filedialog.askopenfilename(initialdir=init, filetypes=[("Parquet", "*.parquet"), ("All", "*.*")])
     else:
         out = filedialog.askopenfilename(initialdir=init, filetypes=[("GeoTIFF", "*.tif *.tiff"), ("All", "*.*")])
     root.destroy()
@@ -138,6 +140,7 @@ for k, v in {
     "selected_id": None, "map_version": 0, "last_click": None, "run_message": None,
     "set_waterbodies_path": settings["waterbodies_path"],
     "set_background_raster": settings["background_raster"],
+    "set_background_table": settings.get("background_table", "data/background_pixels.parquet"),
     "set_local_tci_folder": settings["local_tci_folder"],
     "set_results_dir": settings["results_dir"],
     "set_band_names": ", ".join(settings["background_band_names"]),
@@ -170,7 +173,8 @@ include_slc_off = st.sidebar.checkbox("Include Landsat 7 after May 2003 (striped
 with st.sidebar.expander("Paths & advanced settings"):
     st.caption("Saved to config/user_settings.json when you press Save.")
     for key, label, kind in [("set_waterbodies_path", "Waterbodies layer", "shp"),
-                             ("set_background_raster", "Background (mean/quantile) raster", "tif"),
+                             ("set_background_table", "Background pixel table (ships with the app)", "file"),
+                             ("set_background_raster", "Background raster (optional - used for pixels not in the table)", "tif"),
                              ("set_local_tci_folder", "Local TCI rasters folder", "folder"),
                              ("set_results_dir", "Results folder", "folder")]:
         a, b = st.columns([4, 1])
@@ -186,6 +190,7 @@ with st.sidebar.expander("Paths & advanced settings"):
         save_user_settings(dict(
             waterbodies_path=st.session_state.set_waterbodies_path,
             background_raster=st.session_state.set_background_raster,
+            background_table=st.session_state.set_background_table,
             local_tci_folder=st.session_state.set_local_tci_folder,
             results_dir=st.session_state.set_results_dir,
             background_band_names=[s.strip() for s in st.session_state.set_band_names.split(",") if s.strip()],
@@ -195,6 +200,12 @@ with st.sidebar.expander("Paths & advanced settings"):
     st.caption(f"Prediction engine: {engine_name()}")
 
 band_names = [s.strip() for s in st.session_state.set_band_names.split(",") if s.strip()]
+if not os.path.exists(abs_path(st.session_state.set_background_table)) and \
+        not os.path.exists(st.session_state.set_background_raster):
+    st.sidebar.warning("No background data found: neither the background pixel table "
+                       f"({st.session_state.set_background_table}) nor the background raster is available, so "
+                       "predictions can't run yet. Build the table once with scripts/build_background_table.py "
+                       "on a computer with the D: drive (see README).")
 results_base = abs_path(st.session_state.set_results_dir)
 
 if source_choice.startswith("DEA"):
@@ -208,7 +219,7 @@ else:
 # --------------------------------------------------------------------------
 
 try:
-    layer = get_layer(st.session_state.set_waterbodies_path, settings["waterbody_id_field"],
+    layer = get_layer(abs_path(st.session_state.set_waterbodies_path), settings["waterbody_id_field"],
                       tuple(settings.get("waterbody_label_fields", [])))
 except Exception as e:  # noqa: BLE001
     st.error(f"Could not load the waterbodies layer: {e}\n\nSet the path under 'Paths & advanced settings' in the sidebar.")
@@ -288,6 +299,7 @@ def render_batch():
                 res = pipeline.process_waterbody(
                     wb, info["albers"], info["wgs"], source, start_date, end_date,
                     results_base=results_base, background_path=st.session_state.set_background_raster,
+                    background_table=abs_path(st.session_state.set_background_table),
                     background_bands=band_names, forests=forests, predictors=predictors, thresholds=thresholds,
                     lookup=lookup, min_clear=min_clear, include_ls7_slc_off=include_slc_off, pad_m=pad_m,
                     max_workers=max_workers, progress=lambda f, msg: current.progress(f, text=f"{wb}: {msg}"),
@@ -429,6 +441,7 @@ with tab_single:
                 res = pipeline.process_waterbody(
                     wb_id, sel["albers"], sel["wgs"], source, start_date, end_date,
                     results_base=results_base, background_path=st.session_state.set_background_raster,
+                    background_table=abs_path(st.session_state.set_background_table),
                     background_bands=band_names, forests=forests, predictors=predictors, thresholds=thresholds,
                     lookup=lookup, min_clear=min_clear, include_ls7_slc_off=include_slc_off, pad_m=pad_m,
                     max_workers=max_workers, progress=lambda f, msg: bar.progress(f, text=msg),

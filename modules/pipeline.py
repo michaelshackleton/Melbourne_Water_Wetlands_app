@@ -123,6 +123,7 @@ def process_waterbody(
     results_base: str,
     background_path: str,
     background_bands: list[str],
+    background_table: str | None = None,
     forests: dict[str, Forest],
     predictors: list[str],
     thresholds: dict[str, float],
@@ -151,7 +152,7 @@ def process_waterbody(
         raise RuntimeError("The waterbody polygon does not touch any pixels.")
 
     report(0.02, "Reading background (long-term) predictors...")
-    bg = bgmod.read_background(background_path, background_bands, fp)
+    bg = bgmod.read_background(background_path, background_bands, fp, table_path=background_table)
     warnings = bgmod.background_sanity(bg)
     bg = bg[[c for c in predictors if c in bg.columns]]
 
@@ -162,7 +163,8 @@ def process_waterbody(
         os.path.join(out_dir, "footprint.geojson"), driver="GeoJSON")
     with open(os.path.join(out_dir, "run_info.json"), "w") as f:
         json.dump(dict(Unique_ID=str(wb_id), source=source.name, model_file=model_file, thresholds=thresholds,
-                       background_raster=background_path, background_band_names=background_bands,
+                       background_raster=background_path, background_table=background_table,
+                       background_band_names=background_bands,
                        pad_m=pad_m, last_run=datetime.now().isoformat(timespec="seconds"),
                        last_date_range=[start.isoformat(), end.isoformat()], min_clear=min_clear,
                        include_ls7_slc_off=include_ls7_slc_off), f, indent=2)

@@ -83,7 +83,8 @@ def main():
     workers = args.workers or cfg.get("max_workers", 16)
 
     print("Loading waterbodies layer...")
-    layer = WaterbodyLayer(cfg["waterbodies_path"], cfg["waterbody_id_field"], cfg.get("waterbody_label_fields"))
+    rel = lambda p: p if os.path.isabs(p) else os.path.join(APP, p)  # noqa: E731
+    layer = WaterbodyLayer(rel(cfg["waterbodies_path"]), cfg["waterbody_id_field"], cfg.get("waterbody_label_fields"))
     ids = read_ids(args, cfg["waterbody_id_field"])
     if not ids:
         ap.error("give --ids and/or --ids-file")
@@ -111,6 +112,7 @@ def main():
                 r = pipeline.process_waterbody(
                     wb, sel["albers"], sel["wgs"], source, date.fromisoformat(args.start), date.fromisoformat(args.end),
                     results_base=results_base, background_path=cfg["background_raster"],
+                    background_table=rel(cfg.get("background_table", "data/background_pixels.parquet")),
                     background_bands=cfg["background_band_names"], forests=forests, predictors=predictors,
                     thresholds=thresholds, lookup=lookup, min_clear=args.min_clear,
                     include_ls7_slc_off=not args.no_slc_off, pad_m=cfg.get("pad_m", 60), max_workers=workers,
