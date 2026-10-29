@@ -110,20 +110,35 @@ press **Save** (stored in `config/user_settings.json`, which git ignores).
 The **Batch processing** tab (next to *Single waterbody*) takes a list of
 Unique_IDs - a CSV with a `Unique_ID` column (or pick the column), a text file
 with one ID per line, a zipped shapefile / GeoPackage / GeoJSON, or IDs pasted
-in - and processes them one after another with the sidebar settings. Instead
-of charts it writes to the folder you choose:
+in - and processes them with the sidebar settings. Instead of charts it writes
+to the folder you choose:
 
 * `per_waterbody/<Unique_ID>_cover_area_by_scene.csv` - one row per scene;
 * `all_waterbodies_cover_area_by_scene.csv` - all of the above stacked
-  (rewritten after every waterbody, so it is usable mid-batch);
-* `batch_log.csv` - status, scene counts, time and any warnings per waterbody;
+  (rewritten as the batch goes, so it is usable mid-batch);
+* `batch_log.csv` - one row per waterbody: status, group, `started` /
+  `finished`, timings (`group_minutes`, `min_search`, `min_cloud_check`,
+  `min_download`, `min_model`, `min_write_tables`), `n_pixels`,
+  `scenes_found`, `new_scenes`, `scenes_in_table` and any warnings;
 * optionally `per_waterbody/<Unique_ID>_pixel_by_scene.parquet` (full table).
 
-"Skip waterbodies already written to this folder" lets you stop a batch and
-carry on later; scenes already fetched for a waterbody (by the app or a
-previous batch) are never fetched again. Only scenes inside the sidebar's date
-range and clear threshold are written. While a batch runs, leave the other
-settings alone - changing anything restarts the page and stops the batch.
+**Grouping (on by default).** Nearby waterbodies are processed together:
+everything whose centroid falls in the same 10 km grid cell shares one
+cloud-mask read and one band read per scene, then the pixels are split back
+out to each waterbody. Results are identical to processing them one at a time
+(tested pixel by pixel), but the download - which is nearly all of the run
+time - happens once per group instead of once per waterbody. A random 5,000
+waterbodies from the layer form ~150 groups, i.e. roughly 13-26 hours for 20
+years instead of 3-4 weeks.
+
+**Completeness.** Each group is worked through for every scene in the date
+range before any of its tables are written. Scenes that fail to download are
+retried at the end of the group; a waterbody still missing scenes is logged as
+"incomplete" and gets no table, and the next run fetches only what is missing.
+"Skip waterbodies already written to this folder" (on by default) lets you
+stop a batch at any time and carry on later - progress is saved scene by
+scene. While a batch runs, leave the other settings alone (changing anything
+restarts the page and stops the batch; just start it again to resume).
 
 Columns of the per-scene table:
 
@@ -146,15 +161,46 @@ The cover-type columns plus `no_data_area_ha` add up to `footprint_area_ha`, so
 divide by `clear_area_ha` for proportions of the visible area, or by
 `footprint_area_ha` / `polygon_area_ha` for proportions of the whole waterbody.
 
+### Explore saved results
+
+The third tab charts results that are already on disk - nothing is downloaded,
+so it works offline and for any number of processed waterbodies. Point it at:
+
+* **Saved pixel results** - the results folder (`results\dea`, the default),
+  one waterbody's folder, its `pixels.parquet`, or a folder of batch
+  `*_pixel_by_scene.parquet` files. Gives the cover-over-time chart **and**
+  per-year pixel maps.
+* **Batch output tables** - a batch output folder, its `per_waterbody` folder,
+  one `*_cover_area_by_scene.csv`, or `all_waterbodies_cover_area_by_scene.csv`.
+  Gives the cover-over-time chart only.
+
+Pick one or more waterbodies, then:
+
+* **Cover over time** - the same stacked chart as the first tab (share of
+  clear area or hectares; each scene, monthly or annual means). With several
+  waterbodies, show them **separately** (one chart each) or **combined**
+  (areas added up per month/year; shares weighted by area).
+* **Pixel maps by year** - one small map per year of every 30 m pixel,
+  showing the most frequent cover type that year, how often a chosen cover
+  type occurred, or how often a model said "present" (share of that year's
+  clear scenes). Downloadable as a per-pixel, per-year CSV.
+
+The same filters as the first tab apply (maximum no-data share per scene,
+dates, months).
+
 ### Command-line batch
 
 `scripts/batch_process.py` does the same from a terminal (handy for very long
-lists or overnight runs) and writes the identical tables:
+lists or overnight runs; closing the browser doesn't matter) and writes
+identical tables. Grouping is on by default (`--group-km 10`; `0` = one at a
+time):
 
 ```
 python scripts/batch_process.py --ids-file "D:/eDNA project/eDNA_waterbodies_1000m_buffer_selection.shp" --out "D:/eDNA cover results"
-python scripts/batch_process.py --ids 70730 70731 --start 2000-01-01 --end 2025-12-31 --out "D:/cover results"
+python scripts/batch_process.py --ids-file ids.csv --start 2006-01-01 --end 2026-10-31 --out "D:/cover results"
 ```
+
+Run the same command again to resume or retry incomplete waterbodies.
 
 ## How it differs from the R workflow
 
@@ -226,9 +272,12 @@ two scripts.
 * `modules/rf_engine.py` – random forest prediction (numba, numpy fallback)
 * `modules/classify.py` – thresholds, cover mix → cover description, colours
 * `modules/pipeline.py` – per-waterbody processing, caching, summaries
-* `modules/batch.py` – ID list reading and batch output tables
+* `modules/batch.py` – ID list reading, batch output tables and log
+* `modules/group.py` – grouped processing of nearby waterbodies
+* `modules/explore.py`, `modules/charts.py` – loading saved results and the shared charts
 * `config/` – settings, thresholds (`maxSensSpec thresholds for models 15122025.csv`),
   cover combinations (`all possible combinations.csv`)
 * `models/` – the exported forests
 * `data/` – the waterbodies layer and background pixel table
-* `scripts/` – batch processing, background table builders, background band check, model export/rebuild
+* `scripts/` – batch processing, background table builders, background band check, model export/rebuild,
+  and `read_results.R` (load a waterbody's saved results in R, map cover per pixel per scene, export raster stacks)

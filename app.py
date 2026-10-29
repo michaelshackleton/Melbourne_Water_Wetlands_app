@@ -17,10 +17,12 @@ from __future__ import annotations
 import io
 import json
 import os
+import time
 from datetime import date
 
 import altair as alt
 import folium
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -28,6 +30,7 @@ from branca.colormap import LinearColormap
 from streamlit_folium import st_folium
 
 from modules import batch as batchmod
+from modules import charts, explore
 from modules import pipeline
 from modules.classify import COVER_COLOURS, COVER_ORDER, MIX_ORDER, MODEL_DISPLAY, NO_DATA, NO_PREDICTION, CoverLookup, load_thresholds
 from modules.footprint import build_footprint, pixel_polygons_wgs84
@@ -49,6 +52,7 @@ st.set_page_config(page_title="Waterbody Cover Predictor", layout="wide")
 # Streamlit >= 1.46 replaced use_container_width=True with width="stretch"
 _v = tuple(int(x) for x in st.__version__.split(".")[:2])
 FULL = {"width": "stretch"} if _v >= (1, 46) else {"use_container_width": True}
+CONTENT = {"width": "content"} if _v >= (1, 46) else {"use_container_width": False}
 alt.data_transformers.disable_max_rows()
 
 
@@ -121,6 +125,8 @@ def pick_path(kind: str, initial: str | None) -> str | None:
         out = filedialog.askdirectory(initialdir=init)
     elif kind == "shp":
         out = filedialog.askopenfilename(initialdir=init, filetypes=[("Waterbodies layer", "*.parquet *.shp *.gpkg"), ("All", "*.*")])
+    elif kind == "anyfile":
+        out = filedialog.askopenfilename(initialdir=init, filetypes=[("Results files", "*.parquet *.csv"), ("All", "*.*")])
     elif kind == "file":
         out = filedialog.askopenfilename(initialdir=init, filetypes=[("Parquet", "*.parquet"), ("All", "*.*")])
     else:
@@ -269,6 +275,25 @@ def render_batch():
     skip_written = c1.checkbox("Skip waterbodies already written to this folder", value=True,
                                help="Lets you stop a batch and carry on later.")
     pixel_tables = c2.checkbox("Also write the full pixel-by-scene table for each waterbody (parquet)", value=False)
+    g1, g2 = st.columns(2)
+    grouped = g1.checkbox("Process nearby waterbodies together (much faster)", value=True,
+                          help="Waterbodies in the same grid cell share one download per scene. Results are "
+                               "identical to processing them one at a time. Each group is completed for the whole "
+                               "date range before its tables are written.")
+    cell_km = g2.number_input("Group size (grid cell, km)", 2.0, 50.0, 10.0, 1.0, disabled=not grouped,
+                              help="Larger cells mean fewer, bigger groups. 10 km suits Landsat's image tiles.")
+    todo_ids = [i for i in found if not (skip_written and os.path.exists(os.path.join(
+        st.session_state.batch_out_dir.strip() or ".", "per_waterbody", f"{i}_cover_area_by_scene.csv")))]
+    if grouped and todo_ids:
+        from modules.group import make_groups
+        groups = make_groups(layer.gdf_albers, layer.id_field, todo_ids, cell_km)
+        st.info(f"{len(todo_ids):,} waterbodies to process in **{len(groups):,} groups** "
+                f"(largest group: {max(len(g) for g in groups)}). As a rough guide, each group takes about as long "
+                f"as one waterbody on its own (~5-10 min for 20 years), so roughly "
+                + (f"{len(groups) * 5 / 60:.0f}-{len(groups) * 10 / 60:.0f} hours." if len(groups) * 10 >= 120
+                   else f"{len(groups) * 5:.0f}-{len(groups) * 10:.0f} minutes."))
+    elif todo_ids:
+        st.info(f"{len(todo_ids):,} waterbodies to process one at a time (~5-10 min each for 20 years).")
     st.caption(f"Source: {source.name} · {start_date} to {end_date} · skip scenes under {min_clear:.0%} clear · "
                f"Landsat 7 SLC-off {'included' if include_slc_off else 'excluded'}. Change these in the sidebar.")
     st.warning("While a batch is running, don't change any other setting in the app - that restarts the page and "
@@ -286,10 +311,60 @@ def render_batch():
     overall = st.progress(0.0, text="Starting batch...")
     current = st.progress(0.0, text="")
     status_box = st.empty()
+    if grouped:
+        if not todo_ids:
+            st.success("Everything in the list has already been written to this folder.")
+            return
+        batch_t0 = time.time()
+        shown = []
+        group_minutes = []
+
+        def g_start(gi, ng, ids, done_n, total):
+            eta = ""
+            if group_minutes:
+                left = (ng - gi + 1) * float(np.mean(group_minutes))
+                eta = f" · about {left / 60:.1f} h left" if left >= 90 else f" · about {left:.0f} min left"
+            overall.progress(done_n / total, text=f"Group {gi} of {ng} ({len(ids)} waterbodies) · "
+                                                  f"{done_n:,} of {total:,} waterbodies done · "
+                                                  f"{(time.time() - batch_t0) / 60:.1f} min elapsed{eta}")
+
+        def g_done(gi, ng, recs, wall, done_n, total):
+            group_minutes.append(wall / 60)
+            shown.extend(recs)
+            df = pd.DataFrame(shown)
+            status_box.dataframe(df[[c for c in batchmod.LOG_COLUMNS if c in df.columns]], **FULL, height=300)
+
+        proc_kwargs = dict(results_base=results_base, background_path=st.session_state.set_background_raster,
+                           background_table=abs_path(st.session_state.set_background_table),
+                           background_bands=band_names, forests=forests, predictors=predictors,
+                           thresholds=thresholds, lookup=lookup, min_clear=min_clear,
+                           include_ls7_slc_off=include_slc_off, pad_m=pad_m, max_workers=max_workers,
+                           model_file=os.path.basename(MODEL_NPZ))
+        log = batchmod.run_grouped(layer, groups, source, start_date, end_date, out_folder, pixel_tables,
+                                   proc_kwargs, log, log_path, found, on_group_start=g_start,
+                                   on_progress=lambda f, msg: current.progress(f, text=msg), on_group_done=g_done)
+        overall.progress(1.0, text=f"Batch finished: {len(todo_ids):,} waterbodies in {len(groups)} groups, "
+                                   f"{(time.time() - batch_t0) / 60:.1f} min")
+        n_inc = sum(1 for r in shown if str(r.get("status", "")).startswith(("incomplete", "failed")))
+        combined = batchmod.combine(out_folder, found)
+        if n_inc:
+            st.warning(f"{n_inc} waterbodies are incomplete or failed (see batch_log.csv) - run the batch again "
+                       "to retry just the missing scenes.")
+        st.success(f"Finished. Combined table: {combined}" if combined else "Finished, but no table was written.")
+        return
     rows = []
+    batch_t0 = time.time()
+    done_minutes = []  # wall time of waterbodies actually processed (not skipped), for the estimate
     for n, wb in enumerate(found, 1):
-        overall.progress((n - 1) / len(found), text=f"Waterbody {n} of {len(found)}: {wb}")
+        elapsed = (time.time() - batch_t0) / 60
+        eta = ""
+        if done_minutes:
+            left = (len(found) - n + 1) * float(np.mean(done_minutes))
+            eta = f" · about {left:.0f} min left" if left >= 1 else " · under a minute left"
+        overall.progress((n - 1) / len(found),
+                         text=f"Waterbody {n} of {len(found)}: {wb} · {elapsed:.1f} min elapsed{eta}")
         per_file = os.path.join(out_folder, "per_waterbody", f"{wb}_cover_area_by_scene.csv")
+        t_wb = time.time()
         rec = dict(Unique_ID=wb, started=pd.Timestamp.now().isoformat(timespec="seconds"))
         if skip_written and os.path.exists(per_file):
             rec.update(status="skipped (already written)")
@@ -304,26 +379,301 @@ def render_batch():
                     lookup=lookup, min_clear=min_clear, include_ls7_slc_off=include_slc_off, pad_m=pad_m,
                     max_workers=max_workers, progress=lambda f, msg: current.progress(f, text=f"{wb}: {msg}"),
                     model_file=os.path.basename(MODEL_NPZ))
+                t_write = time.time()
                 tbl = batchmod.write_waterbody(res["out_dir"], wb, info["albers"], out_folder, pixel_tables,
                                                start=start_date, end=end_date, min_clear=min_clear)
-                rec.update(status="done" if len(tbl) else "no scenes passed the filters", scenes_found=res["scenes_found"],
-                           scenes_in_table=len(tbl), new_scenes=res["processed"],
-                           minutes=round(res["seconds"] / 60, 2), warnings=" ".join(res.get("warnings", [])))
+                wall = time.time() - t_wb
+                rec.update(status="done" if len(tbl) else "no scenes passed the filters", scenes_in_table=len(tbl),
+                           **batchmod.timing_fields(res, wall, time.time() - t_write),
+                           warnings=" ".join(res.get("warnings", [])))
+                done_minutes.append(wall / 60)
             except Exception as e:  # noqa: BLE001
-                rec.update(status="failed", warnings=str(e))
+                rec.update(status="failed", minutes_total=round((time.time() - t_wb) / 60, 2), warnings=str(e))
+        rec["finished"] = pd.Timestamp.now().isoformat(timespec="seconds")
         rows.append(rec)
-        log = pd.concat([log, pd.DataFrame([rec])], ignore_index=True).drop_duplicates("Unique_ID", keep="last")
-        log.to_csv(log_path, index=False)
+        log = batchmod.save_log(log_path, log, rec)
         batchmod.combine(out_folder, found)
-        status_box.dataframe(pd.DataFrame(rows), **FULL, height=260)
-    overall.progress(1.0, text=f"Batch finished: {len(found)} waterbodies")
+        show = pd.DataFrame(rows)
+        status_box.dataframe(show[[c for c in batchmod.LOG_COLUMNS if c in show.columns]], **FULL, height=260)
+    overall.progress(1.0, text=f"Batch finished: {len(found)} waterbodies in "
+                               f"{(time.time() - batch_t0) / 60:.1f} min")
     combined = batchmod.combine(out_folder, found)
     st.success(f"Finished. Combined table: {combined}" if combined else "Finished, but no waterbody produced a table.")
 
 
-tab_single, tab_batch = st.tabs(["Single waterbody", "Batch processing"])
+# --------------------------------------------------------------------------
+# Explore saved results tab
+# --------------------------------------------------------------------------
+
+@st.cache_data(show_spinner=False)
+def _load_pixel_source(kind: str, path: str, stamp: float):
+    return explore.load_pixel_source(kind, path)
+
+
+@st.cache_data(show_spinner=False)
+def _load_table(path: str, stamp: float):
+    return pd.read_csv(path, dtype={"Unique_ID": str})
+
+
+def _stamp(kind: str, path: str) -> float:
+    return results_stamp(path) if kind == "dir" else (os.path.getmtime(path) if os.path.exists(path) else 0)
+
+
+@st.cache_data(show_spinner=False, max_entries=8)
+def _available_geojson(ids: tuple, simplify_m: float) -> tuple[str | None, str, list, int]:
+    """(outlines GeoJSON or None when there are too many, points GeoJSON, bounds, count)."""
+    g = layer.gdf_wgs[layer.gdf_wgs[layer.id_field].isin(ids)][[layer.id_field, "_label", "geometry"]].copy()
+    bounds = list(g.total_bounds)
+    pts = g.copy()
+    pts["geometry"] = layer.gdf_albers.loc[g.index].geometry.representative_point().to_crs(4326).values
+    outlines = None
+    if len(g) <= 2500:
+        if simplify_m > 0:
+            g["geometry"] = layer.gdf_albers.loc[g.index].geometry.simplify(simplify_m).to_crs(4326).values
+        outlines = g.to_json()
+    return outlines, pts.to_json(), bounds, len(g)
+
+
+def _explore_map(ids_avail: list, selected: list, labels: dict, path: str):
+    outlines, points, b, n = _available_geojson(tuple(ids_avail), 3.0)
+    span = max(b[2] - b[0], (b[3] - b[1]) * 1.3, 1e-4)
+    zoom = int(np.clip(np.floor(np.log2(360 * 1.6 / span)), 8, 17))
+    m = folium.Map(location=((b[1] + b[3]) / 2, (b[0] + b[2]) / 2), zoom_start=zoom, tiles=None, control_scale=True)
+    folium.TileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                     attr="Esri, Maxar, Earthstar Geographics").add_to(m)
+    tip = folium.GeoJsonTooltip(fields=["_label"], aliases=[""])
+    if outlines:
+        folium.GeoJson(outlines, name="Outlines",
+                       style_function=lambda f: {"color": "#7FDBFF", "weight": 1.5, "fillOpacity": 0.15},
+                       tooltip=tip).add_to(m)
+    folium.GeoJson(points, name="Waterbodies",
+                   marker=folium.CircleMarker(radius=4, color="#0B5394", fill=True, fill_color="#7FDBFF",
+                                              fill_opacity=0.9, weight=1),
+                   tooltip=folium.GeoJsonTooltip(fields=["_label"], aliases=[""])).add_to(m)
+    fg = folium.FeatureGroup(name="Selected")
+    sel_g = layer.gdf_wgs[layer.gdf_wgs[layer.id_field].isin(selected)]
+    if len(sel_g):
+        # highlight only (interactive=False): clicks pass through to the waterbody underneath, so clicking a
+        # selected waterbody again removes it
+        folium.GeoJson(sel_g[[layer.id_field, "_label", "geometry"]].to_json(),
+                       style_function=lambda f: {"color": "#FFD700", "weight": 3, "fillOpacity": 0.35,
+                                                 "fillColor": "#FFD700"}, interactive=False).add_to(fg)
+        sp = sel_g[[layer.id_field, "_label"]].copy()
+        sp["geometry"] = layer.gdf_albers.loc[sel_g.index].geometry.representative_point().to_crs(4326).values
+        folium.GeoJson(gpd.GeoDataFrame(sp, crs=4326).to_json(),
+                       marker=folium.CircleMarker(radius=6, color="#7F6000", fill=True, fill_color="#FFD700",
+                                                  fill_opacity=1, weight=1.5, interactive=False),
+                       interactive=False).add_to(fg)
+    out = st_folium(m, key=f"ex_map_{abs(hash((path, n))) % 10**8}", height=430, use_container_width=True,
+                    feature_group_to_add=fg, returned_objects=["last_object_clicked", "last_clicked"])
+    st.caption(f"{n:,} waterbodies (blue dots{'' if outlines else ' - too many to draw outlines'}); "
+               "selected ones in yellow. Zoom in to see outlines of small waterbodies. To undo a click, remove it "
+               "with × in the list below, or click somewhere else on the map before clicking it again.")
+    click = (out or {}).get("last_object_clicked") or (out or {}).get("last_clicked")
+    if click and click != st.session_state.get("ex_last_click"):
+        st.session_state.ex_last_click = click
+        hit = _nearest_available(click["lng"], click["lat"], ids_avail)
+        if hit:
+            st.session_state.ex_pending_toggle = hit
+            st.rerun()
+
+
+def _nearest_available(lng: float, lat: float, ids_avail: list, max_m: float = 300.0) -> str | None:
+    from shapely.geometry import Point
+    p = Point(lng, lat)
+    g = layer.gdf_wgs
+    cand_idx = list(layer._sindex.query(p.buffer(max_m / 90_000)))
+    if not cand_idx:
+        return None
+    cand = g.iloc[cand_idx]
+    cand = cand[cand[layer.id_field].isin(set(ids_avail))]
+    if cand.empty:
+        return None
+    inside = cand[cand.geometry.contains(p)]
+    if len(inside):
+        return inside.iloc[int(np.argmin(layer.gdf_albers.loc[inside.index].area.to_numpy()))][layer.id_field]
+    d = cand.geometry.distance(p).to_numpy()
+    return cand.iloc[int(np.argmin(d))][layer.id_field]
+
+
+def render_explore():
+    st.subheader("Explore saved results")
+    st.caption("Charts from results already on disk - nothing is downloaded. Point to the app's results folder "
+               "(or one waterbody's folder / its pixels.parquet, or batch pixel-by-scene parquet files) for full "
+               "pixel data, or to batch output tables for the cover-over-time charts only.")
+    kind = st.radio("Load", ["Saved pixel results (results folder, pixels.parquet, pixel_by_scene.parquet)",
+                             "Batch output tables (cover_area_by_scene CSV)"], key="ex_kind")
+    pixel_mode = kind.startswith("Saved")
+    default = os.path.join(results_base, "dea") if pixel_mode else st.session_state.get("batch_out_dir", "")
+    if st.session_state.get("ex_mode_prev") != pixel_mode:
+        st.session_state.ex_path = default
+        st.session_state.ex_mode_prev = pixel_mode
+    a, b, c = st.columns([5, 1, 1])
+    a.text_input("Folder or file", key="ex_path")
+    b.button("Folder…", key="ex_browse_dir", on_click=_browse, args=("ex_path", "folder"))
+    c.button("File…", key="ex_browse_file", on_click=_browse, args=("ex_path", "anyfile"))
+    path = st.session_state.ex_path
+
+    if pixel_mode:
+        sources = explore.find_pixel_sources(path)
+    else:
+        sources = explore.find_table_sources(path)
+    if not sources:
+        st.info("Nothing found there yet. " + ("Choose the results folder (e.g. …\\waterbodies app\\results\\dea), "
+                "a waterbody folder, a pixels.parquet, or a folder of *_pixel_by_scene.parquet files."
+                if pixel_mode else "Choose a batch output folder, its per_waterbody folder, or a *_cover_area_by_scene.csv."))
+        return
+
+    table = None
+    if not pixel_mode and "*" in sources:  # combined table: IDs come from inside it
+        table = _load_table(sources["*"], os.path.getmtime(sources["*"]))
+        ids_avail = sorted(table["Unique_ID"].astype(str).unique(), key=lambda x: (len(x), x))
+    else:
+        ids_avail = sorted(sources, key=lambda x: (len(x), x))
+
+    names = (layer.gdf_wgs.set_index(layer.id_field)["WB_Name"].dropna().to_dict()
+             if "WB_Name" in layer.gdf_wgs.columns else {})
+    labels = {i: (f"{i} | {names[i]}" if names.get(i) else i) for i in ids_avail}
+    st.write(f"**{len(ids_avail):,} waterbodies** found.")
+
+    # selection state: keep only IDs available here; apply a pending map click before the widget is drawn
+    avail_set = set(ids_avail)
+    if "ex_ids" not in st.session_state or not set(st.session_state.ex_ids) <= avail_set:
+        st.session_state.ex_ids = [i for i in st.session_state.get("ex_ids", []) if i in avail_set] or ids_avail[:1]
+    pending = st.session_state.pop("ex_pending_toggle", None)
+    if pending in avail_set:
+        cur = list(st.session_state.ex_ids)
+        st.session_state.ex_ids = [i for i in cur if i != pending] if pending in cur else cur + [pending]
+
+    with st.expander("Map of available waterbodies - click one to add or remove it", expanded=True):
+        _explore_map(ids_avail, list(st.session_state.ex_ids), labels, path)
+    sel = st.multiselect("Waterbodies to show", ids_avail, format_func=lambda i: labels.get(i, i), key="ex_ids")
+    if not sel:
+        return
+
+    # ---- load ----------------------------------------------------------------
+    areas_list, obs_by_id, pix_by_id = [], {}, {}
+    with st.spinner(f"Loading {len(sel)} waterbodies..."):
+        for i in sel:
+            if pixel_mode:
+                k, p = sources[i]
+                res = _load_pixel_source(k, p, _stamp(k, p))
+                if res is None:
+                    continue
+                obs_by_id[i], pix_by_id[i] = res
+                areas_list.append(explore.obs_to_areas(res[0], i))
+            else:
+                t = table[table["Unique_ID"] == i] if table is not None else _load_table(sources[i], os.path.getmtime(sources[i]))
+                if len(t):
+                    areas_list.append(explore.table_to_areas(t))
+    areas_all = pd.concat([x for x in areas_list if len(x)], ignore_index=True) if areas_list else pd.DataFrame()
+    if areas_all.empty:
+        st.warning("No processed scenes in the selected waterbodies.")
+        return
+
+    # ---- filters -------------------------------------------------------------
+    f1, f2, f3 = st.columns(3)
+    max_nd = f1.slider("Max share of pixels with no data in a scene", 0.0, 1.0, 0.1, 0.05, key="ex_nd")
+    dmin, dmax = areas_all["acquired"].min().date(), areas_all["acquired"].max().date()
+    dr = f2.slider("Dates", min_value=dmin, max_value=dmax, value=(dmin, dmax), format="MMM YYYY",
+                   key="ex_dates") if dmin < dmax else (dmin, dmax)
+    months = f3.multiselect("Months (blank = all)", list(range(1, 13)),
+                            format_func=lambda m: date(2000, m, 1).strftime("%b"), key="ex_months")
+    keep = (areas_all["proportion_no_data"] <= max_nd + 1e-9) & \
+           (areas_all["acquired"].dt.date >= dr[0]) & (areas_all["acquired"].dt.date <= dr[1])
+    if months:
+        keep &= areas_all["acquired"].dt.month.isin(months)
+    areas = areas_all[keep]
+    if areas.empty:
+        st.warning("No scenes left after filtering - loosen the filters.")
+        return
+    st.caption(f"{areas[['Unique_ID', 'scene_key']].drop_duplicates().shape[0]:,} waterbody-scenes shown.")
+
+    # ---- cover over time -----------------------------------------------------
+    st.markdown("#### Cover over time")
+    c1, c2, c3 = st.columns(3)
+    measure = c1.radio("Show", ["Share of clear area", "Area (ha)"], horizontal=True, key="ex_measure")
+    agg = c2.radio("Time step", ["Each scene", "Monthly mean", "Annual mean"], index=0 if len(sel) == 1 else 2,
+                   horizontal=True, key="ex_agg")
+    how = "Separately"
+    if len(sel) > 1:
+        how = c3.radio("Waterbodies", ["Separately", "Combined"], horizontal=True, key="ex_how",
+                       help="Combined adds the areas of all selected waterbodies in each time step "
+                            "(shares are area-weighted). Not available for 'Each scene'.")
+    value = "area_ha" if measure == "Area (ha)" else "share"
+    pt = explore.period_table(areas, agg)
+    if how == "Combined":
+        if agg == "Each scene":
+            st.info("Combining needs a time step - showing monthly means.")
+            agg = "Monthly mean"
+            pt = explore.period_table(areas, agg)
+        pt = explore.combine_waterbodies(pt)
+        st.altair_chart(charts.cover_time_chart(pt, value, agg), **FULL)
+    elif len(sel) > 1:
+        if len(sel) > 20:
+            st.info("Showing the first 20 selected waterbodies - choose fewer, or use Combined.")
+            pt = pt[pt["Unique_ID"].isin(sel[:20])]
+        st.altair_chart(charts.cover_time_chart(pt, value, agg, facet=True, labels=labels), **CONTENT)
+    else:
+        st.altair_chart(charts.cover_time_chart(pt, value, agg), **FULL)
+    st.download_button("Download the charted values (CSV)",
+                       pt.rename(columns={"acquired": "acquired_or_period"}).to_csv(index=False).encode(),
+                       file_name="cover_over_time.csv", mime="text/csv", key="ex_dl_pt")
+
+    # ---- pixel maps by year --------------------------------------------------
+    st.markdown("#### Pixel maps by year")
+    if not pixel_mode:
+        st.info("Pixel maps need the saved pixel data - choose 'Saved pixel results' above.")
+        return
+    wb = st.selectbox("Waterbody", [i for i in sel if i in obs_by_id], format_func=lambda i: labels.get(i, i),
+                      key="ex_map_wb")
+    obs = obs_by_id[wb]
+    o = obs[(obs["proportion_no_data"] <= max_nd + 1e-9) & (obs["date"].dt.date >= dr[0]) &
+            (obs["date"].dt.date <= dr[1])]
+    if months:
+        o = o[o["date"].dt.month.isin(months)]
+    fy = explore.yearly_pixel_frequencies(o)
+    if fy.empty:
+        st.info("No clear observations for this waterbody with the current filters.")
+        return
+    desc_cols = sorted([c for c in fy.columns if c.startswith("freq: ")],
+                       key=lambda c: COVER_ORDER.index(c[6:]) if c[6:] in COVER_ORDER else 99)
+    choices = ["Most frequent cover type"] + [f"How often: {c[6:]}" for c in desc_cols] + \
+              [f"Model presence: {MODEL_DISPLAY[m]}" for m in MIX_ORDER]
+    m1, m2 = st.columns([3, 2])
+    pick = m1.selectbox("Map", choices, key="ex_map_layer")
+    years = sorted(fy["year"].unique())
+    yr = m2.select_slider("Years", options=years, value=(years[0], years[-1]), key="ex_years") if len(years) > 1 \
+        else (years[0], years[0])
+    fy = fy[(fy["year"] >= yr[0]) & (fy["year"] <= yr[1])]
+    if pick == "Most frequent cover type":
+        col, cover_name = "dominant_cover", None
+    elif pick.startswith("How often"):
+        cover_name = pick[len("How often: "):]
+        col = "freq: " + cover_name
+    else:
+        cover_name = None
+        col = "presence: " + [k for k, v in MODEL_DISPLAY.items() if v == pick[len("Model presence: "):]][0]
+    n_years = fy["year"].nunique()
+    st.caption(f"{n_years} years · each square is a 30 m pixel · value = share of that year's clear scenes "
+               "(after the filters above).")
+    l1, l2 = st.columns(2)
+    per_row = l1.slider("Maps per row", 1, 20, min(n_years, 8), key="ex_per_row")
+    total_w = l2.slider("Width of the map panel (pixels on screen)", 600, 2600, 1200, 50, key="ex_total_w",
+                        help="Set this to roughly the width of your browser window so the maps fill the page.")
+    panel_px = max(60, int((total_w - 20 * per_row) / per_row))
+    st.altair_chart(charts.pixel_year_chart(fy, pix_by_id[wb], col, cover_name, columns=per_row,
+                                            panel_px=panel_px), **CONTENT)
+    st.download_button("Download per-pixel, per-year values (CSV)",
+                       fy.merge(pix_by_id[wb], on="pixel_id", how="left").to_csv(index=False).encode(),
+                       file_name=f"{wb}_pixels_by_year.csv", mime="text/csv", key="ex_dl_fy")
+
+
+tab_single, tab_batch, tab_explore = st.tabs(["Single waterbody", "Batch processing", "Explore saved results"])
 with tab_batch:
     render_batch()
+with tab_explore:
+    render_explore()
 
 with tab_single:
     # --------------------------------------------------------------------------
@@ -446,8 +796,11 @@ with tab_single:
                     lookup=lookup, min_clear=min_clear, include_ls7_slc_off=include_slc_off, pad_m=pad_m,
                     max_workers=max_workers, progress=lambda f, msg: bar.progress(f, text=msg),
                     model_file=os.path.basename(MODEL_NPZ))
+                t = res.get("timing", {})
                 msg = (f"Found {res['scenes_found']:,} scenes; {res.get('already_done', 0):,} were already processed; "
-                       f"processed {res['processed']:,} new scenes in {res['seconds'] / 60:.1f} min.")
+                       f"processed {res['processed']:,} new scenes in {res['seconds'] / 60:.1f} min "
+                       f"(search {t.get('search_s', 0) / 60:.1f}, cloud check {t.get('cloud_check_s', 0) / 60:.1f}, "
+                       f"download {t.get('download_s', 0) / 60:.1f}, models {t.get('model_s', 0) / 60:.1f} min).")
                 st.session_state.run_message = ("success", msg, res.get("warnings", []))
             except Exception as e:  # noqa: BLE001
                 st.session_state.run_message = ("error", f"Run failed: {e}", [])
@@ -497,43 +850,25 @@ with tab_single:
         a1, a2 = st.columns(2)
         measure = a1.radio("Show", ["Area (ha)", "Share of clear area"], horizontal=True)
         agg = a2.radio("Time step", ["Each scene", "Monthly mean", "Annual mean"], horizontal=True)
-        d = areas.copy()
-        value = "area_ha" if measure == "Area (ha)" else "share_of_clear_area"
-        if value == "share_of_clear_area":
-            d = d[d["cover_description"] != NO_DATA]
-        wide = d.pivot_table(index=["scene_key", "date"], columns="cover_description", values=value,
-                             aggfunc="sum", fill_value=0).reset_index()
-        if agg != "Each scene":
-            freq = "MS" if agg == "Monthly mean" else "YS"
-            wide = wide.drop(columns="scene_key").groupby(pd.Grouper(key="date", freq=freq)).mean().dropna(how="all").reset_index()
-        long = wide.melt(id_vars=[c for c in ["scene_key", "date"] if c in wide.columns], var_name="cover", value_name="value")
-        present = [c for c in COVER_ORDER if c in long["cover"].unique()] + \
-                  [c for c in long["cover"].unique() if c not in COVER_ORDER]
-        long["order"] = long["cover"].map({c: i for i, c in enumerate(present)})
-        colours = [COVER_COLOURS.get(c, "#999999") for c in present]
+        value = "area_ha" if measure == "Area (ha)" else "share"
         ytitle = "Area (ha)" if value == "area_ha" else "Share of clear area"
-        yenc = alt.Y("value:Q", stack="zero", title=ytitle,
-                     axis=alt.Axis(format="%" if value != "area_ha" else ",.2f"))
-        chart = alt.Chart(long).mark_area(interpolate="step-after" if agg == "Annual mean" else "linear").encode(
-            x=alt.X("date:T", title=None), y=yenc,
-            color=alt.Color("cover:N", scale=alt.Scale(domain=present, range=colours), title="Cover type",
-                            legend=alt.Legend(orient="right", labelLimit=320)),
-            order=alt.Order("order:Q"),
-            tooltip=[alt.Tooltip("date:T"), "cover:N", alt.Tooltip("value:Q", format=",.3f")],
-        ).properties(height=420)
-        st.altair_chart(chart.interactive(bind_y=False), **FULL)
+        pt = explore.period_table(areas.assign(Unique_ID=wb_id), agg)
+        st.altair_chart(charts.cover_time_chart(pt, value, agg), **FULL)
 
         st.markdown("**Single model over time** - area where one model says the cover is present")
         mpick = st.selectbox("Model", MIX_ORDER, index=MIX_ORDER.index("openwater_50"), format_func=lambda k: MODEL_DISPLAY[k])
         v = obs[obs["cover_description"] != NO_DATA]
         per = (v.assign(a=v[f"{mpick}_binary"] * v["coverage_fraction"] * 0.09, c=v["coverage_fraction"] * 0.09)
-               .groupby("date", as_index=False).agg(area_ha=("a", "sum"), clear_ha=("c", "sum")))
+               .assign(acquired=lambda x: pd.to_datetime(x["date"]) + pd.to_timedelta(x["time"].astype(str)))
+               .groupby(["scene_key", "acquired"], as_index=False).agg(area_ha=("a", "sum"), clear_ha=("c", "sum"))
+               .sort_values("acquired"))
         per["share"] = per["area_ha"] / per["clear_ha"]
         line = alt.Chart(per).mark_line(point=True, color=COVER_COLOURS["Water"] if "water" in mpick else "#2D6B2D").encode(
-            x=alt.X("date:T", title=None),
+            x=alt.X("acquired:T", title=None),
             y=alt.Y("area_ha:Q" if value == "area_ha" else "share:Q", title=ytitle,
                     axis=alt.Axis(format="%" if value != "area_ha" else ",.2f")),
-            tooltip=["date:T", alt.Tooltip("area_ha:Q", format=",.3f"), alt.Tooltip("share:Q", format=".1%")],
+            tooltip=[alt.Tooltip("acquired:T", title="Acquired (UTC)", format="%Y-%m-%d %H:%M"),
+                     alt.Tooltip("area_ha:Q", format=",.3f"), alt.Tooltip("share:Q", format=".1%")],
         ).properties(height=260)
         st.altair_chart(line.interactive(bind_y=False), **FULL)
 

@@ -171,10 +171,13 @@ def process_waterbody(
 
     if bg.isna().all(axis=1).all():
         return dict(out_dir=out_dir, n_pixels=len(fp.pixels), scenes_found=0, processed=0, warnings=warnings,
-                    seconds=time.time() - t0, stopped=False)
+                    seconds=time.time() - t0, stopped=False, timing=dict(total_s=time.time() - t0))
 
+    timing = dict(setup_s=time.time() - t0, search_s=0.0, cloud_check_s=0.0, download_s=0.0, model_s=0.0)
     report(0.04, f"Searching {source.name} for scenes...")
+    _t = time.time()
     scenes = source.search(fp, polygon_wgs84, start, end, include_ls7_slc_off=include_ls7_slc_off)
+    timing["search_s"] = time.time() - _t
     man = _load_manifest(out_dir)
     done = set(man.loc[man["status"] == "processed", "scene_key"].astype(str))
     known_clear = dict(zip(man["scene_key"].astype(str), man["clear_fraction"]))
@@ -187,6 +190,7 @@ def process_waterbody(
     masks: dict[str, np.ndarray] = {}
     new_rows = []
     if need_mask:
+        _t = time.time()
         res = run_parallel(lambda s: source.clear_mask(s, fp), need_mask, max_workers,
                            progress=lambda d, n, m: report(0.05 + 0.35 * d / n, f"Checking cloud cover: scene {d}/{n}"),
                            should_stop=should_stop)
@@ -198,6 +202,7 @@ def process_waterbody(
             masks[s.key] = r
             known_clear[s.key] = float((cov * r).sum() / cov_sum) if cov_sum > 0 else 0.0
 
+        timing["cloud_check_s"] = time.time() - _t
     candidates = []
     for s in todo:
         cf = known_clear.get(s.key, np.nan)
@@ -230,6 +235,7 @@ def process_waterbody(
 
         base = 0.40 + 0.58 * ci / max(1, len(candidates))
         span = 0.58 * len(chunk) / max(1, len(candidates))
+        _t = time.time()
         res = run_parallel(read_one, chunk, max_workers,
                            progress=lambda d, n, m: report(base + span * 0.85 * d / n,
                                                            f"Reading scenes {ci + d}/{len(candidates)}"),
@@ -244,15 +250,20 @@ def process_waterbody(
             rows.append(_scene_row(s, known_clear.get(s.key), "processed"))
         if ok:
             report(base + span * 0.9, f"Running models on {len(ok)} scenes x {len(fp.pixels)} pixels...")
+            timing["download_s"] += time.time() - _t
+            _t = time.time()
             df = predict_chunk(ok, fp, bg, forests, predictors, thresholds, lookup, wb_id)
             df.to_parquet(os.path.join(out_dir, "obs", f"part-{int(time.time() * 1000)}.parquet"), index=False)
+            timing["model_s"] += time.time() - _t
             processed += len(ok)
         man = pd.concat([man, pd.DataFrame(rows)], ignore_index=True)
         _save_manifest(out_dir, man)
         masks = {k: v for k, v in masks.items() if k not in {s.key for s in chunk}}
 
     report(1.0, "Done")
+    timing["total_s"] = time.time() - t0
     return dict(out_dir=out_dir, n_pixels=len(fp.pixels), scenes_found=len(scenes), already_done=len(done),
+                cloud_checked=len(need_mask), timing=timing,
                 processed=processed, candidates=len(candidates), warnings=warnings,
                 seconds=time.time() - t0, stopped=stopped)
 
@@ -296,12 +307,15 @@ def scene_cover_areas(obs: pd.DataFrame) -> pd.DataFrame:
     a = obs.assign(area_ha=obs["coverage_fraction"] * PIXEL_AREA_M2 / 10_000)
     out = (a.groupby(["scene_key", "date", "time", "platform", "proportion_no_data", "cover_description"], as_index=False)
            .agg(area_ha=("area_ha", "sum"), n_pixels=("pixel_id", "size")))
+    # acquisition date-time (UTC): two scenes can share a date (e.g. two satellites, or
+    # overlapping paths), so plots and tables key on this rather than the date alone
+    out.insert(2, "acquired", pd.to_datetime(out["date"]) + pd.to_timedelta(out["time"].astype(str)))
     tot = out.groupby("scene_key")["area_ha"].transform("sum")
     out["share_of_footprint"] = out["area_ha"] / tot
     clear_tot = out[out["cover_description"] != NO_DATA].groupby("scene_key")["area_ha"].sum()
     out["share_of_clear_area"] = np.where(out["cover_description"] == NO_DATA, np.nan,
                                           out["area_ha"] / out["scene_key"].map(clear_tot))
-    return out.sort_values(["date", "cover_description"])
+    return out.sort_values(["acquired", "cover_description"])
 
 
 def pixel_frequencies(obs: pd.DataFrame) -> pd.DataFrame:

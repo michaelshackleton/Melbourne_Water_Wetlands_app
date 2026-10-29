@@ -295,15 +295,10 @@ class LocalTCISource:
         return arr[:, fp.rows, fp.cols]
 
     def clear_mask(self, scene: Scene, fp: Footprint) -> np.ndarray:
-        vals = self._read_all(scene, fp)
-        scene._cache = vals  # type: ignore[attr-defined]
-        return np.isfinite(vals).all(axis=0)
+        return np.isfinite(self._read_all(scene, fp)).all(axis=0)
 
     def read_tci(self, scene: Scene, fp: Footprint, clear: np.ndarray) -> dict[str, np.ndarray]:
-        vals = getattr(scene, "_cache", None)
-        if vals is None:
-            vals = self._read_all(scene, fp)
-        vals = vals.astype(np.float32)
+        vals = self._read_all(scene, fp).astype(np.float32)
         vals[:, ~clear] = np.nan
         return {"wetness": vals[0], "brightness": vals[1], "greenness": vals[2]}
 
